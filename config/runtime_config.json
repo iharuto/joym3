@@ -1,0 +1,34 @@
+{
+    "speed": {
+        "tick_hz": 120,
+        "step_min": 3,
+        "step_max": 15,
+        "ramp_sec": 0.7
+    },
+    "buttons": {
+        "A": {
+            "action": "mouse_click",
+            "value": "left"
+        },
+        "B": {
+            "action": "mouse_click",
+            "value": "right"
+        },
+        "X": {
+            "action": "keyboard",
+            "value": "space"
+        },
+        "Y": {
+            "action": "keyboard",
+            "value": "escape"
+        },
+        "R": {
+            "action": "none",
+            "value": null
+        },
+        "ZR": {
+            "action": "none",
+            "value": null
+        }
+    }
+}

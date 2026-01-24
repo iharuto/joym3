@@ -1,0 +1,4 @@
+hid==1.0.8
+pyobjc-core
+pyobjc-framework-Quartz
+pyobjc-framework-Cocoa

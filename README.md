@@ -16,12 +16,24 @@ For these reasons, I wanted a lightweight and flexible Joy-Con-based cursor cont
 
 ## SetUp
 
+- Install packages through homebrew
+
 ```bash
 brew install hidapi
-/opt/homebrew/bin/python3 -m venv ~/joycon-venv
-~/joycon-venv/bin/activate
-pip install --upgrade pip
-pip install hid pyobjc
+brew install python-tk@3.13
+```
+
+- Git clone
+
+```bash
+git clone https://github.com/iharuto/joym3.git
+cd joym3
+```
+
+- set up venv and install py packages
+
+```bash
+ ./setup_venv.sh
 ```
 
 then, connect joycon to mac via bluetooth. to see the succeeded connection, run
