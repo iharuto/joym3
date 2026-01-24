@@ -1,5 +1,19 @@
 # joym3
 
+## What is this
+joym3 is a small tool/script that enables cursor control on macOS using a Nintendo Switch Joy-Con controller via Bluetooth.
+
+## Why is this
+This project was created because JoyKeyMapper did not work on my MacBook (Apple M3), and I wanted a more customizable alternative—especially for presentation use (e.g., mapping buttons to specific actions).
+The script was developed with the assistance of ChatGPT, and I customized it to fit my workflow.
+
+In my presentation setup:
+- I cannot use a physical laser pointer because the display is electronic.
+- Using the macOS control panel as a laser pointer is also uncomfortable, since it can scratch my finger during operation.
+
+For these reasons, I wanted a lightweight and flexible Joy-Con-based cursor controller that I can tailor to my needs.
+
+
 ## SetUp
 
 ```bash
