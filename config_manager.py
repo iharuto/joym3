@@ -15,13 +15,16 @@ def get_default_config() -> Dict[str, Any]:
             "tick_hz": 120,
             "step_min": 5,
             "step_max": 20,
-            "ramp_sec": 0.7
+            "ramp_sec": 0.7,
+            "scroll_multiplier": 10,
+            "double_click_ms": 250
         },
         "buttons": {
             "A": {"action": "mouse_click", "value": "left"},
-            "B": {"action": "mouse_click", "value": "right"},
-            "X": {"action": "keyboard", "value": "space"},
-            "Y": {"action": "keyboard", "value": "escape"},
+            "X": {"action": "mouse_click", "value": "right"},
+            "B": {"action": "keyboard", "value": "right"},
+            "Y": {"action": "keyboard", "value": "left"},
+            "+": {"action": "keyboard", "value": "escape"},
             "R": {"action": "none", "value": None},
             "ZR": {"action": "none", "value": None}
         }
@@ -114,6 +117,18 @@ def validate_config(config: Dict[str, Any]) -> bool:
         if "ramp_sec" in speed:
             ramp_sec = speed["ramp_sec"]
             if not isinstance(ramp_sec, (int, float)) or ramp_sec < 0.1 or ramp_sec > 2.0:
+                return False
+
+        # Check scroll_multiplier
+        if "scroll_multiplier" in speed:
+            scroll_multiplier = speed["scroll_multiplier"]
+            if not isinstance(scroll_multiplier, (int, float)) or scroll_multiplier < 1 or scroll_multiplier > 50:
+                return False
+
+        # Check double_click_ms
+        if "double_click_ms" in speed:
+            double_click_ms = speed["double_click_ms"]
+            if not isinstance(double_click_ms, int) or double_click_ms < 200 or double_click_ms > 500:
                 return False
 
     # Validate button settings

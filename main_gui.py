@@ -8,8 +8,10 @@ from tkinter import ttk, messagebox
 import subprocess
 import os
 import sys
+import time
 import config_manager
 import bluetooth_utils
+import shared_state
 
 
 class JoyConGUI:
@@ -65,15 +67,18 @@ class JoyConGUI:
         self.connection_tab = ttk.Frame(self.notebook)
         self.speed_tab = ttk.Frame(self.notebook)
         self.button_tab = ttk.Frame(self.notebook)
+        self.status_tab = ttk.Frame(self.notebook)
 
         self.notebook.add(self.connection_tab, text="Connection")
         self.notebook.add(self.speed_tab, text="Speed Control")
         self.notebook.add(self.button_tab, text="Button Customization")
+        self.notebook.add(self.status_tab, text="Live Status")
 
         # Setup each tab
         self.setup_connection_tab()
         self.setup_speed_tab()
         self.setup_button_tab()
+        self.setup_status_tab()
 
     def setup_connection_tab(self):
         """Setup the connection tab UI."""
@@ -110,7 +115,7 @@ class JoyConGUI:
         button_frame = ttk.Frame(self.connection_tab)
         button_frame.pack(pady=10)
 
-        self.connect_btn = ttk.Button(button_frame, text="Connect", command=self.connect_device)
+        self.connect_btn = ttk.Button(button_frame, text="Allow control", command=self.connect_device)
         self.connect_btn.pack(side=tk.LEFT, padx=5)
 
         self.stop_btn = ttk.Button(button_frame, text="Stop", command=self.stop_device, state=tk.DISABLED)
@@ -157,6 +162,9 @@ class JoyConGUI:
         self.status_label.config(text="Disconnected", foreground="red")
         self.connect_btn.config(state=tk.NORMAL)
         self.stop_btn.config(state=tk.DISABLED)
+
+        # Clear status display
+        shared_state.clear_state()
 
     def setup_speed_tab(self):
         """Setup the speed control tab UI."""
@@ -221,6 +229,40 @@ class JoyConGUI:
         tick_spinbox.pack(side=tk.LEFT, padx=5)
         ttk.Label(poll_inner, text="Hz").pack(side=tk.LEFT)
 
+        # Scroll Speed
+        scroll_frame = ttk.LabelFrame(settings_frame, text="Scroll Speed (R + Stick)", padding=10)
+        scroll_frame.pack(fill=tk.X, pady=10)
+
+        scroll_multiplier = self.config["speed"].get("scroll_multiplier", 10)
+        self.scroll_multiplier_var = tk.IntVar(value=scroll_multiplier)
+        self.scroll_multiplier_label = ttk.Label(scroll_frame, text=str(self.scroll_multiplier_var.get()))
+        self.scroll_multiplier_label.pack()
+
+        scroll_scale = ttk.Scale(scroll_frame, from_=1, to=50, orient=tk.HORIZONTAL,
+                                variable=self.scroll_multiplier_var,
+                                command=lambda v: self.scroll_multiplier_label.config(text=str(int(float(v)))))
+        scroll_scale.pack(fill=tk.X)
+
+        # Double-Click Timing
+        double_click_frame = ttk.LabelFrame(settings_frame, text="Double-Click Timing", padding=10)
+        double_click_frame.pack(fill=tk.X, pady=10)
+
+        double_click_inner = ttk.Frame(double_click_frame)
+        double_click_inner.pack()
+
+        ttk.Label(double_click_inner, text="Max delay between clicks:").pack(side=tk.LEFT, padx=5)
+
+        self.double_click_ms_var = tk.IntVar(value=self.config["speed"].get("double_click_ms", 250))
+        double_click_combo = ttk.Combobox(
+            double_click_inner,
+            textvariable=self.double_click_ms_var,
+            values=[200, 250, 300, 350, 400, 450, 500],
+            state="readonly",
+            width=8
+        )
+        double_click_combo.pack(side=tk.LEFT, padx=5)
+        ttk.Label(double_click_inner, text="ms").pack(side=tk.LEFT)
+
         # Apply button
         apply_btn = ttk.Button(settings_frame, text="Apply Settings", command=self.apply_speed_settings)
         apply_btn.pack(pady=20)
@@ -232,6 +274,8 @@ class JoyConGUI:
         self.config["speed"]["step_max"] = self.step_max_var.get()
         self.config["speed"]["ramp_sec"] = round(self.ramp_sec_var.get(), 2)
         self.config["speed"]["tick_hz"] = self.tick_hz_var.get()
+        self.config["speed"]["scroll_multiplier"] = self.scroll_multiplier_var.get()
+        self.config["speed"]["double_click_ms"] = self.double_click_ms_var.get()
 
         # Validate config
         if not config_manager.validate_config(self.config):
@@ -262,7 +306,7 @@ class JoyConGUI:
         mappings_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
 
         # Button names
-        buttons = ["A", "B", "X", "Y", "R", "ZR"]
+        buttons = ["A", "B", "X", "Y", "+", "R", "ZR"]
 
         # Store widgets
         self.button_action_vars = {}
@@ -304,6 +348,20 @@ class JoyConGUI:
             help_text = "(left/right for mouse, key name for keyboard)"
             ttk.Label(row_frame, text=help_text, font=("Helvetica", 8), foreground="gray").pack(side=tk.LEFT, padx=5)
 
+        # Mode information frame
+        info_frame = ttk.LabelFrame(self.button_tab, text="Mode Operations", padding=10)
+        info_frame.pack(fill=tk.X, padx=20, pady=10)
+
+        info_text = """Special Modes (hold button + stick):
+• R + Stick: Scroll mode
+• ZR + Stick: Drag mode (mouse drag)
+• ZR + X: Zoom in (Cmd + +)
+• ZR + B: Zoom out (Cmd + -)
+
+Note: R and ZR buttons are used for modes and cannot be customized."""
+        info_label = ttk.Label(info_frame, text=info_text, justify=tk.LEFT, font=("Helvetica", 9))
+        info_label.pack()
+
         # Profile management frame
         profile_frame = ttk.LabelFrame(self.button_tab, text="Profile Management", padding=10)
         profile_frame.pack(fill=tk.X, padx=20, pady=10)
@@ -334,6 +392,134 @@ class JoyConGUI:
         # Apply button
         apply_btn = ttk.Button(self.button_tab, text="Apply Button Settings", command=self.apply_button_settings)
         apply_btn.pack(pady=10)
+
+    def setup_status_tab(self):
+        """Setup the live status monitoring tab."""
+        # Title
+        title = ttk.Label(self.status_tab, text="Live Button Status",
+                         font=("Helvetica", 14, "bold"))
+        title.pack(pady=10)
+
+        # Button status frame
+        button_frame = ttk.LabelFrame(self.status_tab, text="Button States", padding=20)
+        button_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+
+        # Create button status labels
+        self.button_status_labels = {}
+        buttons = ["A", "B", "X", "Y", "+", "R", "ZR"]
+
+        # Create 2 rows of buttons
+        row1_frame = ttk.Frame(button_frame)
+        row1_frame.pack(pady=10)
+
+        row2_frame = ttk.Frame(button_frame)
+        row2_frame.pack(pady=10)
+
+        for i, button_name in enumerate(buttons):
+            parent = row1_frame if i < 4 else row2_frame
+
+            btn_frame = ttk.Frame(parent, relief=tk.RAISED, borderwidth=2)
+            btn_frame.pack(side=tk.LEFT, padx=10, pady=5)
+
+            # Button name
+            ttk.Label(btn_frame, text=button_name, font=("Helvetica", 12, "bold")).pack(pady=5)
+
+            # Status label
+            status_label = ttk.Label(btn_frame, text="Released",
+                                    font=("Helvetica", 10),
+                                    background="lightgray",
+                                    foreground="black",
+                                    width=10)
+            status_label.pack(pady=5, padx=10)
+
+            self.button_status_labels[button_name] = status_label
+
+        # Mode display frame
+        mode_frame = ttk.LabelFrame(self.status_tab, text="Current Mode", padding=20)
+        mode_frame.pack(fill=tk.X, padx=20, pady=10)
+
+        self.mode_label = ttk.Label(mode_frame, text="NORMAL",
+                                    font=("Helvetica", 16, "bold"),
+                                    foreground="blue")
+        self.mode_label.pack(pady=10)
+
+        # Last action frame
+        action_frame = ttk.LabelFrame(self.status_tab, text="Last Action", padding=20)
+        action_frame.pack(fill=tk.X, padx=20, pady=10)
+
+        self.last_action_label = ttk.Label(action_frame, text="No action yet",
+                                           font=("Helvetica", 10),
+                                           wraplength=500)
+        self.last_action_label.pack(pady=10)
+
+        # Connection status
+        self.connection_status_label = ttk.Label(self.status_tab,
+                                                 text="⚠️ Not connected - start cursor control to see live status",
+                                                 font=("Helvetica", 10),
+                                                 foreground="red")
+        self.connection_status_label.pack(pady=10)
+
+        # Start polling
+        self.poll_button_state()
+
+    def poll_button_state(self):
+        """Poll the shared state file and update button status display."""
+        state = shared_state.read_state()
+
+        if state and self.cursor_process is not None:
+            # Update connection status
+            self.connection_status_label.config(
+                text="✓ Connected - showing live status",
+                foreground="green"
+            )
+
+            # Update button states
+            buttons = state.get("buttons", {})
+            for button_name, is_pressed in buttons.items():
+                if button_name in self.button_status_labels:
+                    label = self.button_status_labels[button_name]
+                    if is_pressed:
+                        label.config(text="PRESSED", background="lightgreen", foreground="darkgreen")
+                    else:
+                        label.config(text="Released", background="lightgray", foreground="black")
+
+            # Update mode
+            mode = state.get("mode", "unknown").upper()
+            mode_colors = {
+                "NORMAL": "blue",
+                "ZOOM": "green",
+                "DRAG": "orange",
+                "SCROLL": "purple"
+            }
+            self.mode_label.config(text=mode, foreground=mode_colors.get(mode, "black"))
+
+            # Update last action
+            last_action = state.get("last_action", "No action")
+            timestamp = state.get("timestamp", 0)
+            age = time.time() - timestamp
+            self.last_action_label.config(text=f"{last_action} ({age:.1f}s ago)")
+        else:
+            # No state or not connected
+            if self.cursor_process is None:
+                self.connection_status_label.config(
+                    text="⚠️ Not connected - start cursor control to see live status",
+                    foreground="red"
+                )
+            else:
+                self.connection_status_label.config(
+                    text="⚠️ Waiting for state updates...",
+                    foreground="orange"
+                )
+
+            # Reset all buttons to released
+            for label in self.button_status_labels.values():
+                label.config(text="Released", background="lightgray", foreground="black")
+
+            self.mode_label.config(text="UNKNOWN", foreground="gray")
+            self.last_action_label.config(text="No data")
+
+        # Schedule next poll (100ms = 10Hz)
+        self.root.after(100, self.poll_button_state)
 
     def apply_button_settings(self):
         """Apply button settings to configuration."""

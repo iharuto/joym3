@@ -1,24 +1,30 @@
 {
     "speed": {
         "tick_hz": 120,
-        "step_min": 3,
-        "step_max": 15,
-        "ramp_sec": 0.7
+        "step_min": 1,
+        "step_max": 20,
+        "ramp_sec": 0.7,
+        "scroll_multiplier": 1,
+        "double_click_ms": 200
     },
     "buttons": {
         "A": {
             "action": "mouse_click",
             "value": "left"
         },
-        "B": {
+        "X": {
             "action": "mouse_click",
             "value": "right"
         },
-        "X": {
+        "B": {
             "action": "keyboard",
-            "value": "space"
+            "value": "right"
         },
         "Y": {
+            "action": "keyboard",
+            "value": "left"
+        },
+        "+": {
             "action": "keyboard",
             "value": "escape"
         },
