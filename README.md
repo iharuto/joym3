@@ -1,5 +1,7 @@
 # joym3
 
+## Demo
+
 ## What is this
 joym3 is a small tool/script that enables cursor control on macOS using a Nintendo Switch Joy-Con controller via Bluetooth.
 
@@ -59,7 +61,7 @@ output would be like
 count: 1
 ```
 
-## Test
+## Brief test
 
 
 ```bash
@@ -154,7 +156,7 @@ Move stick / press buttons. Ctrl+C to stop.
 ```
 
 
-## Execution
+## Brief execution
 
 ```bash
 python - <<'PY'
