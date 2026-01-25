@@ -1,0 +1,10 @@
+.DS_Store
+DS_Store
+joycon-venv
+.claude
+CLAUDE.md
+__pycache__
+test
+joycon_state.json
+joycon_state.json.tmp
+test_presentation.pptx
