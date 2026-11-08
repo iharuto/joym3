@@ -347,6 +347,69 @@ dev = hid.Device(path=info["path"])
 dev.nonblocking = True   # ★ここがあなたの環境では正解
 
 print(f"Opened {info.get('product_string')}  VID={info['vendor_id']:04x} PID={info['product_id']:04x}")
+
+# ---- Cursor control source: "stick" or "gyro" (toggle with R-stick click) ----
+control_source = "stick"
+GYRO_SENS = 75.0            # pixels per (deg/sec * sec); ~100 deg/s ≈ 1200 px/s. Raise for faster
+GYRO_DEADZONE_DPS = 2.0     # ignore tiny rotations (drift/jitter)
+# Axis mapping (depends on how you hold the Joy-Con). Flip signs / swap if wrong.
+GYRO_X_AXIS, GYRO_X_SIGN = 2, 1   # gyro axis index (0=x,1=y,2=z) -> screen X
+GYRO_Y_AXIS, GYRO_Y_SIGN = 1, -1   # gyro axis index -> screen Y
+STICK_DEADZONE = 0.35
+STICK_SWAP_XY = False       # set True if stick left/right moves vertically
+STICK_X_SIGN, STICK_Y_SIGN = 1, 1
+STICK_CLICK_MASK = 0x04     # byte 4 in 0x30 report
+
+_pkt = 0
+def send_subcommand(subcmd, arg):
+    global _pkt
+    rumble = bytes([0x00, 0x01, 0x40, 0x40, 0x00, 0x01, 0x40, 0x40])
+    dev.write(bytes([0x01, _pkt & 0x0F]) + rumble + bytes([subcmd, arg]))
+    _pkt += 1
+    time.sleep(0.05)
+
+def init_full_report_mode():
+    send_subcommand(0x40, 0x01)  # enable IMU
+    send_subcommand(0x03, 0x30)  # standard full report (includes IMU)
+
+try:
+    init_full_report_mode()
+    print("Full report mode + IMU enabled (stick-click toggles Stick/Gyro)")
+except Exception as e:
+    print(f"Could not enable gyro mode: {e} (stick only)")
+
+def s16(lo, hi):
+    v = lo | (hi << 8)
+    return v - 65536 if v & 0x8000 else v
+
+def parse_full_report(b):
+    """Parse 0x30 report -> (btn1, btn2, vx, vy, stick_click, gyro_dps[3]) using legacy masks."""
+    r_btns, shared = b[3], b[4]
+    btn1 = 0
+    if r_btns & 0x08: btn1 |= A_MASK
+    if r_btns & 0x04: btn1 |= B_MASK
+    if r_btns & 0x02: btn1 |= X_MASK
+    if r_btns & 0x01: btn1 |= Y_MASK
+    btn2 = 0
+    if shared & 0x02: btn2 |= PLUS_MASK
+    if r_btns & 0x40: btn2 |= R_MASK
+    if r_btns & 0x80: btn2 |= ZR_MASK
+    sx = (b[9] | ((b[10] & 0x0F) << 8)) - 2048
+    sy = ((b[10] >> 4) | (b[11] << 4)) - 2048
+    fx, fy = sx / 1400.0, sy / 1400.0
+    if STICK_SWAP_XY:
+        fx, fy = fy, fx
+    fx *= STICK_X_SIGN
+    fy *= -STICK_Y_SIGN
+    vx_ = (fx > STICK_DEADZONE) - (fx < -STICK_DEADZONE)
+    vy_ = (fy > STICK_DEADZONE) - (fy < -STICK_DEADZONE)
+    gyro = [0.0, 0.0, 0.0]
+    if len(b) >= 49:
+        for i in range(3):  # 3 IMU samples per report, average gyro
+            base = 13 + 12 * i + 6
+            for ax in range(3):
+                gyro[ax] += s16(b[base + 2 * ax], b[base + 2 * ax + 1]) * 0.06103 / 3
+    return btn1, btn2, vx_, vy_, bool(shared & STICK_CLICK_MASK), gyro
 print("Joy-Con (R) Controls:")
 print("  Stick: Move cursor | A: Left click (double-tap for double-click) | X: Right click")
 print("  B: Right arrow | Y: Left arrow | +: ESC")
@@ -406,18 +469,60 @@ a_click_state = "idle"
 a_first_click_time = 0.0
 
 next_tick = time.perf_counter()
+last_stick_click = False
+gyro_acc_x = gyro_acc_y = 0.0
+gyro_bias = [0.0, 0.0, 0.0]   # per-axis resting offset (deg/s)
+calib_skip = 0                # reports to ignore (click shake) before calibrating
+calib_left = 0                # reports left to average for initial calibration
+calib_sum = [0.0, 0.0, 0.0]
+gyro_calibrated = False       # calibrate only once per script run
 
 try:
     while True:
         data = dev.read(64)
         if data:
             b = bytes(data)
-            if len(b) >= 4:
-                btn1 = b[1]
-                btn2 = b[2]  # Read byte 2 for R, ZR, +
-                hat  = b[3]
+            if b[0] == 0x30 and len(b) >= 12:
+                btn1, btn2, vx, vy, click_now, gyro = parse_full_report(b)
+                if click_now and not last_stick_click:
+                    control_source = "gyro" if control_source == "stick" else "stick"
+                    print(f"[CTRL] Cursor control → {control_source}")
+                    if control_source == "gyro" and not gyro_calibrated:
+                        # Hold the Joy-Con still for ~0.6s to measure the resting offset
+                        calib_skip, calib_left, calib_sum = 12, 40, [0.0, 0.0, 0.0]
+                        gyro_acc_x = gyro_acc_y = 0.0
+                        print("[CTRL] Calibrating gyro - keep Joy-Con still...")
+                last_stick_click = click_now
+                if control_source == "gyro":
+                    dt = 0.015  # ~66Hz reports
+                    if calib_skip > 0:
+                        calib_skip -= 1
+                    elif calib_left > 0:
+                        for i in range(3):
+                            calib_sum[i] += gyro[i]
+                        calib_left -= 1
+                        if calib_left == 0:
+                            gyro_bias = [v / 40 for v in calib_sum]
+                            gyro_calibrated = True
+                            print(f"[CTRL] Gyro calibrated, bias={[round(v, 2) for v in gyro_bias]}")
+                    else:
+                        g = [gyro[i] - gyro_bias[i] for i in range(3)]
+                        gx = g[GYRO_X_AXIS] * GYRO_X_SIGN
+                        gy = g[GYRO_Y_AXIS] * GYRO_Y_SIGN
+                        if abs(gx) > GYRO_DEADZONE_DPS:
+                            gyro_acc_x += gx * dt * GYRO_SENS
+                        if abs(gy) > GYRO_DEADZONE_DPS:
+                            gyro_acc_y += gy * dt * GYRO_SENS
+                parsed = True
+            elif b[0] == 0x3F and len(b) >= 4:
+                btn1, btn2 = b[1], b[2]
+                vx, vy = HAT_TO_VEC.get(b[3], (0, 0))
+                parsed = True
+            else:
+                parsed = False  # subcommand replies etc.
 
-                vx, vy = HAT_TO_VEC.get(hat, (0, 0))
+            if parsed:
+                hat = None
                 if vx or vy:
                     if moving_since is None:
                         moving_since = time.perf_counter()
@@ -580,7 +685,7 @@ try:
             # Check if pending drag should be activated
             if pending_drag and not is_dragging:
                 elapsed = now - pending_drag_time
-                has_movement = (vx != 0 or vy != 0)
+                has_movement = (vx != 0 or vy != 0) or control_source == "gyro"
 
                 if elapsed >= DRAG_ARM_DELAY and has_movement:
                     # Delay elapsed + stick movement confirmed → start drag
@@ -593,7 +698,22 @@ try:
                     print(f"[drag] ✗ ARMED drag timeout (no movement in {elapsed*1000:.0f}ms)")
                     pending_drag = False
 
-            if vx or vy:
+            # Gyro cursor control (normal + drag modes); stick still drives scroll
+            if control_source == "gyro" and not r_now:
+                mx, my = int(gyro_acc_x), int(gyro_acc_y)
+                if mx or my:
+                    gyro_acc_x -= mx
+                    gyro_acc_y -= my
+                    x, y = current_mouse_pos()
+                    cx, cy = clamp_coordinates(x + mx, y + my, SCREEN_WIDTH, SCREEN_HEIGHT)
+                    if is_dragging:
+                        drag_move(cx, cy)
+                    else:
+                        post_move_abs(cx, cy)
+            elif control_source != "gyro":
+                gyro_acc_x = gyro_acc_y = 0.0
+
+            if (vx or vy) and not (control_source == "gyro" and not r_now):
                 # Calculate movement parameters
                 t = 0.0 if moving_since is None else (now - moving_since)
                 alpha = min(max(t / RAMP_SEC, 0.0), 1.0)
