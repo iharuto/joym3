@@ -18,6 +18,15 @@ In my presentation setup:
 For these reasons, I wanted a lightweight and flexible Joy-Con-based cursor controller that I can tailor to my needs.
 
 
+## HowToStart
+
+Frist, connect device and JoyCon iva bluetooth
+
+```bash
+cd ./joym3 && source joycon-venv/bin/activate && python control_cursor.py
+```
+
+
 ## SetUp
 
 - Install packages through homebrew
